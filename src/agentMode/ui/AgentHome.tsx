@@ -15,13 +15,9 @@ import { AgentWelcomeCard } from "@/agentMode/ui/AgentWelcomeCard";
 import { AgentHomeReleaseUpdate } from "@/components/release-update/AgentHomeReleaseUpdate";
 import { RelevantNotes } from "@/components/chat-components/RelevantNotes";
 import { CopilotBrandIcon } from "@/components/ui/CopilotBrandIcon";
-import { AgentHomeShelf, type AgentHomeShelfSection } from "@/agentMode/ui/AgentHomeShelf";
+import type { AgentHomeShelfSection } from "@/agentMode/ui/AgentHomeShelf";
+import { AgentHomeSidebar, AgentHomeSidebarToggle } from "@/agentMode/ui/AgentHomeSidebar";
 import { GlobalRecentChatsSection } from "@/agentMode/ui/GlobalRecentChatsSection";
-import {
-  getHomeShelfTab,
-  setHomeShelfTab,
-  HOME_SHELF_TAB_STORAGE_KEY,
-} from "@/agentMode/ui/homeShelfPrefs";
 import { ProjectPickerList } from "@/agentMode/ui/ProjectPickerList";
 import { RelevantNotesShelfPanel } from "@/agentMode/ui/RelevantNotesShelfPanel";
 import { useRelevantNotesPaneOpen } from "@/agentMode/ui/useRelevantNotesPaneOpen";
@@ -467,8 +463,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
   });
 
   // Project landing lower-area placement: zero chats → the Context body renders
-  // standalone below the composer (no shelf); any chats → the tabbed shelf
-  // (Recent Chats / Context). Decided per landing VISIT (project + session) and
+  // standalone below the composer; any chats → Context is reached through the
+  // sidebar only (Recent Chats / Context). Decided per landing VISIT (project + session) and
   // latched, so in-visit churn can't swap the layout under the user:
   //
   // - Undecided until the scoped history load settles — rendering neither beats
@@ -524,26 +520,34 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
     if (isLanding) void handleLoadChatHistory();
   }, [isLanding, handleLoadChatHistory]);
 
-  // Global shelf tab lives HERE (not in the shelf's own state) because the
-  // global shelf unmounts whenever the user leaves the global landing — into a
-  // project, or into a conversation and back via New Chat. This is deliberate
-  // instance-level UI memory: wherever the user left the global shelf, they
-  // return to it (entering a project from the Projects tab and backing out
-  // lands on Projects again instead of snapping to Recent Chats). AgentHome
-  // stays mounted across those switches, so the state survives. On top of that
-  // in-instance memory we seed from (and write back to) device-local storage so
-  // the choice also survives a full remount / reload. null = nothing picked yet
-  // → the shelf resolves to its first selectable tab.
-  const [globalShelfTab, setGlobalShelfTabState] = useState<string | null>(() =>
-    getHomeShelfTab(app, HOME_SHELF_TAB_STORAGE_KEY)
+  // Left sidebar (Recent Chats / Relevant Notes / Projects, or the project's
+  // Recent Chats / Context). State is tied to the session it was set in, so every
+  // newly opened dialog starts collapsed on its first section (Recent Chats).
+  // null section = the sidebar's first selectable section.
+  const [sidebarState, setSidebarState] = useState<{
+    sessionId: string;
+    open: boolean;
+    sectionId: string | null;
+  }>({ sessionId, open: false, sectionId: null });
+  const sidebarOpen = sidebarState.sessionId === sessionId && sidebarState.open;
+  const sidebarSectionId = sidebarState.sessionId === sessionId ? sidebarState.sectionId : null;
+  const toggleSidebar = useCallback(() => {
+    setSidebarState((prev) =>
+      prev.sessionId === sessionId
+        ? { ...prev, open: !prev.open }
+        : { sessionId, open: true, sectionId: null }
+    );
+  }, [sessionId]);
+  const selectSidebarSection = useCallback(
+    (id: string) => setSidebarState({ sessionId, open: true, sectionId: id }),
+    [sessionId]
   );
-  const setGlobalShelfTab = useCallback(
-    (id: string) => {
-      setGlobalShelfTabState(id);
-      setHomeShelfTab(app, HOME_SHELF_TAB_STORAGE_KEY, id);
-    },
-    [app]
-  );
+
+  // The conversation surface doesn't load history on its own, so fetch it when
+  // the sidebar opens there.
+  useEffect(() => {
+    if (sidebarOpen) void handleLoadChatHistory();
+  }, [sidebarOpen, handleLoadChatHistory]);
 
   // Chip-shelf sections for the landing. Each body renders lazily (only the open
   // section is mounted), so these render closures are cheap to recreate.
@@ -797,6 +801,9 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
 
   return (
     <div ref={setRootEl} className="tw-flex tw-size-full tw-flex-col tw-overflow-hidden">
+      <div className="tw-flex tw-shrink-0 tw-items-center tw-px-2">
+        <AgentHomeSidebarToggle open={sidebarOpen} onToggle={toggleSidebar} />
+      </div>
       {/* Project header sits ABOVE the tab strip: a project scope is just the
           global layout (tab strip → landing/conversation) with the project
           header prepended on top. It spans BOTH the project landing and the
@@ -846,8 +853,19 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
           onSave={persistCreateProject}
         />
       )}
-      <div className="tw-min-h-0 tw-flex-1">
-        <div ref={chatContainerRef} className="tw-flex tw-size-full tw-flex-col tw-overflow-hidden">
+      <div className="tw-flex tw-min-h-0 tw-flex-1">
+        {sidebarOpen && (
+          <AgentHomeSidebar
+            className="tw-w-72 tw-max-w-[50%] tw-shrink-0"
+            sections={isProjectScope ? projectLandingSections : landingSections}
+            activeSectionId={sidebarSectionId}
+            onSectionSelect={selectSidebarSection}
+          />
+        )}
+        <div
+          ref={chatContainerRef}
+          className="tw-flex tw-min-w-0 tw-flex-1 tw-flex-col tw-overflow-hidden"
+        >
           <div className="tw-h-full">
             <div className="tw-relative tw-flex tw-h-full tw-flex-col">
               <AgentHomeReleaseUpdate
@@ -928,26 +946,6 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                           />
                         </div>
                       ) : undefined
-                    }
-                    shelf={
-                      isProjectLanding ? (
-                        // Tabbed Recent Chats / Context card, only once the
-                        // project has chats. Keyed by project so the selected
-                        // tab resets instead of leaking across scope switches
-                        // (the global and project shelves share this slot).
-                        // null while the placement is undecided (history not
-                        // settled) or standalone — the stack drops the shelf
-                        // wrapper entirely so no empty gap remains.
-                        projectPlacement && !projectPlacement.standalone ? (
-                          <AgentHomeShelf key={activeProjectId} sections={projectLandingSections} />
-                        ) : null
-                      ) : (
-                        <AgentHomeShelf
-                          sections={landingSections}
-                          activeSectionId={globalShelfTab}
-                          onSectionSelect={setGlobalShelfTab}
-                        />
-                      )
                     }
                   />
                 ) : (
