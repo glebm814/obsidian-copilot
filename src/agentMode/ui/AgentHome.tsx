@@ -801,9 +801,6 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
 
   return (
     <div ref={setRootEl} className="tw-flex tw-size-full tw-flex-col tw-overflow-hidden">
-      <div className="tw-flex tw-shrink-0 tw-items-center tw-px-2">
-        <AgentHomeSidebarToggle open={sidebarOpen} onToggle={toggleSidebar} />
-      </div>
       {/* Project header sits ABOVE the tab strip: a project scope is just the
           global layout (tab strip → landing/conversation) with the project
           header prepended on top. It spans BOTH the project landing and the
@@ -845,7 +842,15 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
           />
         </div>
       </div>
-      <AgentTabStrip manager={manager} />
+      {/* Sidebar toggle leads the tab row (instead of its own row above it) so
+          the chat column gets that vertical space back. The strip measures its
+          own width, so the toggle doesn't skew its tab-fit math. */}
+      <div className="tw-flex tw-shrink-0 tw-items-center tw-pl-2">
+        <AgentHomeSidebarToggle open={sidebarOpen} onToggle={toggleSidebar} />
+        <div className="tw-min-w-0 tw-flex-1">
+          <AgentTabStrip manager={manager} />
+        </div>
+      </div>
       {createAnchor && (
         <CreateProjectPanel
           anchorEl={createAnchor}

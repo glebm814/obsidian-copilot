@@ -112,9 +112,9 @@ export function AgentHomeSidebarToggle({
           onClick={onToggle}
           aria-label={label}
           aria-expanded={open}
-          className="tw-shrink-0"
+          className="tw-size-8 tw-shrink-0"
         >
-          <Icon className="tw-size-4" />
+          <Icon className="tw-size-5" />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
