@@ -49,6 +49,14 @@ If your plugin does not need CSS, delete this file.
   );
 }
 
+/* Agent Chat lays out its own gutters (tab row, chat column), so Obsidian's
+   default view padding only strands empty space above the tab strip and
+   around the chat. Desktop only: mobile hosts rely on that padding to clear
+   the safe area and bottom navigation. */
+body:not(.is-mobile) .workspace-leaf-content[data-type="copilot-agent-chat-view"] .view-content {
+  padding: 0;
+}
+
 .copilot-openartifacts-modal {
   width: min(32rem, calc(100vw - 2rem));
   min-width: 0;
