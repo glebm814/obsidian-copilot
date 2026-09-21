@@ -558,6 +558,8 @@ const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(function Cha
           lexicalEditorRef.current.update(() => {
             $removeActiveNotePills();
           });
+          // The badge that held focus is gone — hand focus back to the prompt.
+          lexicalEditorRef.current.focus();
         }
         break;
       case "notes":
