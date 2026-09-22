@@ -4,6 +4,7 @@
  * session-pool invariants without touching ACP or spawning a child process.
  */
 import { FileSystemAdapter, App, Notice, TFile } from "obsidian";
+import { mockTFile } from "@/__tests__/mockObsidian";
 import { join } from "node:path";
 import { waitFor } from "@testing-library/react";
 import { AgentSession } from "./AgentSession";
@@ -214,6 +215,11 @@ function makeMockSession(overrides: {
       labelSource = source;
     },
     setLabel: jest.fn(),
+    loadDisplayMessages: jest.fn((messages) => {
+      displayMessages = messages;
+      hasUserVisibleMessages = messages.length > 0;
+    }),
+    seedSessionUsage: jest.fn(),
     getSessionUsage: () => null,
     subscribe: (l: Parameters<typeof listeners.add>[0]) => {
       listeners.add(l);
@@ -362,7 +368,8 @@ function modelCatalog(baseModelId: string): BackendModelCatalog {
 
 function buildManager(
   modelPreloaderOverrides: Partial<AgentModelPreloader> = {},
-  persistenceManager?: ConstructorParameters<typeof AgentSessionManager>[2]["persistenceManager"]
+  persistenceManager?: ConstructorParameters<typeof AgentSessionManager>[2]["persistenceManager"],
+  app = buildApp()
 ): AgentSessionManager {
   const descriptor = buildDescriptor();
   const modelPreloader = {
@@ -378,7 +385,7 @@ function buildManager(
     ...modelPreloaderOverrides,
   };
   return new AgentSessionManager(
-    buildApp(),
+    app,
     buildPlugin() as unknown as ConstructorParameters<typeof AgentSessionManager>[1],
     {
       persistenceManager,
@@ -638,6 +645,66 @@ describe("AgentSessionManager", () => {
     });
 
     describe("createSession()", () => {
+      it.each([false, true])(
+        "waits for the startup upgrade and respects shutdown=%s before launching (https://github.com/Brevilabs/obsidian-copilot-private/issues/530)",
+        async (shutdown) => {
+          let finish!: () => void;
+          const upgrade = new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          const beforeBackendStart = jest.fn(() => upgrade);
+          const descriptor = buildDescriptor();
+          const mgr = new AgentSessionManager(buildApp(), buildPlugin() as never, {
+            permissionPrompter: jest.fn(),
+            resolveDescriptor: () => descriptor,
+            modelPreloader: {
+              takeWarm: jest.fn(() => null),
+              shutdown: jest.fn(),
+            } as unknown as AgentModelPreloader,
+            beforeBackendStart,
+          });
+          const creating = mgr.createSession();
+          await waitFor(() => expect(beforeBackendStart).toHaveBeenCalled());
+          expect(mockBackendStart).not.toHaveBeenCalled();
+          if (shutdown) await mgr.shutdown();
+          finish();
+          if (shutdown) await expect(creating).rejects.toThrow("shut down");
+          else {
+            await creating;
+            expect(mockBackendStart).toHaveBeenCalledTimes(1);
+          }
+        }
+      );
+
+      it("keeps a validated running process usable when another installation is selected (https://github.com/Brevilabs/obsidian-copilot-private/issues/531)", async () => {
+        const descriptor = buildDescriptor();
+        const mgr = new AgentSessionManager(buildApp(), buildPlugin() as never, {
+          permissionPrompter: jest.fn(),
+          resolveDescriptor: () => descriptor,
+          modelPreloader: { takeWarm: jest.fn(() => null) } as unknown as AgentModelPreloader,
+        });
+        await mgr.createSession();
+        (descriptor.getInstallState as jest.Mock).mockReturnValue({
+          kind: "incompatible",
+          message: "Upgrade required",
+        });
+        await expect(mgr.createSession()).resolves.toBeDefined();
+        expect(mockBackendStart).toHaveBeenCalledTimes(1);
+      });
+      it("rejects an unsupported installation before starting its process (https://github.com/Brevilabs/obsidian-copilot-private/issues/531)", async () => {
+        const descriptor = buildDescriptor();
+        (descriptor.getInstallState as jest.Mock).mockReturnValue({
+          kind: "incompatible",
+          message: "Upgrade required",
+        });
+        const mgr = new AgentSessionManager(buildApp(), buildPlugin() as never, {
+          permissionPrompter: jest.fn(),
+          resolveDescriptor: () => descriptor,
+          modelPreloader: { takeWarm: jest.fn(() => null) } as unknown as AgentModelPreloader,
+        });
+        await expect(mgr.createSession()).rejects.toThrow("Upgrade required");
+        expect(mockBackendStart).not.toHaveBeenCalled();
+      });
       it("creates a session and sets it as the active one", async () => {
         const mgr = buildManager();
         const session = await mgr.createSession();
@@ -1140,6 +1207,55 @@ describe("AgentSessionManager", () => {
           effort: null,
         });
         expect(mgr.getDefaultSelection("opencode")).toEqual(saved);
+      });
+    });
+
+    describe("getSessionSourcePath()", () => {
+      setupSavedNoteTests();
+      it("keeps unsaved sessions independent of a saved session and follows its file rename https://github.com/Brevilabs/obsidian-copilot-private/issues/539", async () => {
+        const file = mockTFile({ path: "chat/Conversation.md" });
+        const app = buildApp();
+        jest.mocked(app.vault.getAbstractFileByPath).mockReturnValue(file);
+        const saveSession = jest.fn().mockResolvedValue({ path: file.path });
+        const mgr = buildManager({}, { saveSession } as never, app);
+        const first = await mgr.createSession();
+        expect(mgr.getSessionSourcePath(first.internalId)).toBe("");
+        getSessionTestHandle(first).setMessages([{ message: "Hello" }]);
+        const listener = jest.fn();
+        mgr.subscribe(listener);
+        await mgr.saveActiveSession();
+        expect(listener).toHaveBeenCalledTimes(1);
+        expect(mgr.getSessionSourcePath(first.internalId)).toBe(file.path);
+        file.path = "archive/Conversation.md";
+        expect(mgr.getSessionSourcePath(first.internalId)).toBe(file.path);
+        expect(await mgr.saveActiveSession()).toEqual({ path: file.path });
+        const second = await mgr.createSession();
+        expect(mgr.getSessionSourcePath(second.internalId)).toBe("");
+        mgr.setActiveSession(first.internalId);
+        getSessionTestHandle(first).setMessages([{ message: "Changed" }]);
+        saveSession.mockResolvedValue(null);
+        await mgr.saveActiveSession();
+        expect(mgr.getSessionSourcePath(first.internalId)).toBe(file.path);
+        expect(saveSession).toHaveBeenLastCalledWith(
+          expect.anything(),
+          first.backendId,
+          expect.objectContaining({ existingPath: file.path })
+        );
+        await mgr.shutdown();
+      });
+      it("uses the loaded conversation file before any save https://github.com/Brevilabs/obsidian-copilot-private/issues/539", async () => {
+        const file = mockTFile({ path: "chat/Loaded.md" });
+        const loadFile = jest.fn().mockResolvedValue({
+          backendId: "opencode",
+          projectId: GLOBAL_SCOPE,
+          messages: [{ message: "Loaded" }],
+        });
+        const mgr = buildManager({}, { loadFile } as never);
+        const loaded = await mgr.loadSessionFromHistory(file);
+        expect(mgr.getSessionSourcePath(loaded.internalId)).toBe(file.path);
+        file.path = "archive/Loaded.md";
+        expect(mgr.getSessionSourcePath(loaded.internalId)).toBe(file.path);
+        await mgr.shutdown();
       });
     });
 
@@ -2214,10 +2330,8 @@ describe("AgentSessionManager.getRunningChatIds", () => {
     mgr.subscribe(listener);
     await mgr.saveActiveSession();
 
-    // The save itself must not notify (autosave stays decoupled from row
-    // visibility). Instead the set now carries BOTH ids, so whichever id the
-    // mounted list rendered the row under, `.has()` still hits.
-    expect(listener).not.toHaveBeenCalled();
+    // The saved source path becomes observable without dropping either recent-list identity.
+    expect(listener).toHaveBeenCalledTimes(1);
     const ids = mgr.getRunningChatIds();
     expect(ids.has("chats/agent__saved.md")).toBe(true);
     expect(ids.has(nativeId)).toBe(true);
@@ -2483,7 +2597,7 @@ describe("AgentSessionManager.applySelection", () => {
     const descriptor = {
       id: "opencode",
       displayName: "opencode",
-      getInstallState: jest.fn(),
+      getInstallState: jest.fn(() => ({ kind: "ready", source: "custom" })),
       subscribeInstallState: jest.fn(),
       openInstallUI: jest.fn(),
       createBackendProcess: jest.fn(() => makeMockBackendProcess()),
@@ -2659,7 +2773,7 @@ describe("AgentSessionManager default-model settings subscription", () => {
     return {
       id: "opencode",
       displayName: "opencode",
-      getInstallState: jest.fn(),
+      getInstallState: jest.fn(() => ({ kind: "ready", source: "custom" })),
       subscribeInstallState: jest.fn(),
       openInstallUI: jest.fn(),
       createBackendProcess: jest.fn(() => makeMockBackendProcess()),
@@ -3183,6 +3297,7 @@ describe("AgentSessionManager chat history aggregation", () => {
     /** Defaults to true; set false to model a non-summarizing backend (codex). */
     summarizesSessionTitle?: boolean;
     backendId?: BackendId;
+    installState?: InstallState;
     createBackendProcess?: jest.Mock;
     applyInitialSessionConfig?: BackendDescriptor["applyInitialSessionConfig"];
   }) {
@@ -3236,6 +3351,7 @@ describe("AgentSessionManager chat history aggregation", () => {
     const descriptor = {
       ...buildDescriptor(),
       id: backendId,
+      getInstallState: jest.fn(() => opts?.installState ?? { kind: "ready", source: "custom" }),
       summarizesSessionTitle: opts?.summarizesSessionTitle ?? true,
       getProbeSessionId: jest.fn(() => opts?.probeSessionId),
       applyInitialSessionConfig: opts?.applyInitialSessionConfig,
@@ -3277,7 +3393,7 @@ describe("AgentSessionManager chat history aggregation", () => {
         sessionIndex: index,
       }
     );
-    return { manager, index, persistence };
+    return { manager, index, persistence, descriptor };
   }
 
   it("merges markdown and native entries, de-duplicated on backend session id", async () => {
@@ -3453,6 +3569,25 @@ describe("AgentSessionManager chat history aggregation", () => {
   });
 
   describe("loadNativeSessionFromHistory()", () => {
+    it("does not spawn or load history through an incompatible binary (https://github.com/Brevilabs/obsidian-copilot-private/issues/531)", async () => {
+      const createBackendProcess = jest.fn(() => makeMockBackendProcess());
+      const { manager } = buildHistoryHarness({
+        installState: {
+          kind: "incompatible",
+          source: "custom",
+          currentVersion: "1",
+          minVersion: "2",
+          message: "Upgrade required",
+        },
+        createBackendProcess,
+      });
+      await expect(manager.loadNativeSessionFromHistory("opencode", "saved-chat")).rejects.toThrow(
+        "Could not resume"
+      );
+      expect(createBackendProcess).not.toHaveBeenCalled();
+      expect(manager.getActiveSession()).toBeNull();
+      expect(manager.getLastError()).toContain("Upgrade required");
+    });
     it("matches live sessions by the (backendId, sessionId) pair, not session id alone", async () => {
       const { manager } = buildHistoryHarness();
       const session = await manager.createSession("opencode");
@@ -3525,7 +3660,8 @@ describe("AgentSessionManager chat history aggregation", () => {
           backends: { claude: { defaultMode: "auto" } },
         },
       };
-      (mockedGetSettings as jest.Mock).mockReturnValueOnce(settings).mockReturnValueOnce(settings);
+      const previousSettings = (mockedGetSettings as jest.Mock).getMockImplementation();
+      (mockedGetSettings as jest.Mock).mockReturnValue(settings);
 
       let returned = false;
       const loading = manager
@@ -3556,6 +3692,7 @@ describe("AgentSessionManager chat history aggregation", () => {
       });
       expect(session.getState()?.model?.current.effort).toBe("high");
       expect(session.getState()?.mode?.current).toBe("auto");
+      (mockedGetSettings as jest.Mock).mockImplementation(previousSettings);
     });
 
     it("keeps focus on the most recently opened history row when resumes finish out of order", async () => {

@@ -3,9 +3,9 @@ import type CopilotPlugin from "@/main";
 import { getSettings, setSettings, type CopilotSettings } from "@/settings/model";
 import { detectBinary } from "@/utils/detectBinary";
 import { resolveCodexAcpBinary } from "./codexBinaryResolver";
-import { CODEX_BUNDLE_VERSION } from "./codexArchive";
+import { CODEX_PINNED_VERSION } from "./codexArchive";
 import { CodexBackendDescriptor, detectCodexAcpPath, getCodexBinaryManager } from "./descriptor";
-import { isSupportedCodexAcpPath, resolveSupportedCodexAcpPackage } from "./codexVersion";
+import { isSupportedCodexAcpPath, inspectCodexAcpPackage, CODEX_MIN_VERSION } from "./codexVersion";
 
 jest.mock("@/utils/detectBinary", () => ({ detectBinary: jest.fn() }));
 jest.mock("./codexBinaryResolver", () => ({
@@ -15,7 +15,7 @@ jest.mock("./codexBinaryResolver", () => ({
 jest.mock("./codexVersion", () => ({
   ...jest.requireActual("./codexVersion"),
   isSupportedCodexAcpPath: jest.fn(),
-  resolveSupportedCodexAcpPackage: jest.fn(),
+  inspectCodexAcpPackage: jest.fn(),
 }));
 
 const mockedDetectBinary = jest.mocked(detectBinary);
@@ -68,7 +68,7 @@ const ADVERTISED_CONFIG_OPTIONS: BackendConfigOption[] = [
     ],
   },
 ];
-const mockedResolveSupportedPackage = jest.mocked(resolveSupportedCodexAcpPackage);
+const mockedResolveSupportedPackage = jest.mocked(inspectCodexAcpPackage);
 
 function settingsWithCodex(codex: Record<string, unknown>): CopilotSettings {
   return {
@@ -272,13 +272,53 @@ describe("descriptor", () => {
       expect(CodexBackendDescriptor.auth).toBe(codexAuth);
     });
     describe("getInstallState()", () => {
+      it.each(["managed", "custom"] as const)(
+        "https://github.com/Brevilabs/obsidian-copilot-private/issues/535 reports below-minimum %s runtime as incompatible",
+        (source) => {
+          mockedResolveSupportedPackage.mockReturnValue({
+            entryPath: "/codex/index.js",
+            version: "0.0.44",
+            runtimeVersion: "0.0.44",
+          });
+          expect(
+            CodexBackendDescriptor.getInstallState(
+              settingsWithCodex({
+                binaryPath: "/codex/index.js",
+                binarySource: source,
+                binaryVersion: CODEX_PINNED_VERSION,
+              })
+            )
+          ).toMatchObject({
+            kind: "incompatible",
+            source,
+            currentVersion: "0.0.44",
+            minVersion: CODEX_MIN_VERSION,
+          });
+        }
+      );
+      it.each([
+        ["ENOENT", "absent"],
+        ["EINVAL", "error"],
+      ])(
+        "https://github.com/Brevilabs/obsidian-copilot-private/issues/535 classifies %s inspection failure as %s",
+        (code, kind) => {
+          mockedResolveSupportedPackage.mockImplementation(() => {
+            throw Object.assign(new Error("Invalid package"), { code });
+          });
+          expect(
+            CodexBackendDescriptor.getInstallState(
+              settingsWithCodex({ binaryPath: "/codex/index.js" })
+            ).kind
+          ).toBe(kind);
+        }
+      );
       it.each([
         ["legacy path", {}, "1.9.0", { kind: "ready", source: "custom" }],
         [
           "managed older bundle",
           { binarySource: "managed", binaryVersion: "1.9.0-r1" },
           "1.9.0-r1",
-          { kind: "incompatible", source: "managed" },
+          { kind: "ready", source: "managed" },
         ],
         [
           "custom mismatch",
@@ -290,20 +330,21 @@ describe("descriptor", () => {
           "managed packaging mismatch",
           { binarySource: "managed", binaryVersion: "1.10.0-r2" },
           "1.10.0-r2",
-          { kind: "incompatible", source: "managed" },
+          { kind: "ready", source: "managed" },
         ],
         [
           "managed pin",
-          { binarySource: "managed", binaryVersion: CODEX_BUNDLE_VERSION },
-          CODEX_BUNDLE_VERSION,
+          { binarySource: "managed", binaryVersion: CODEX_PINNED_VERSION },
+          CODEX_PINNED_VERSION,
           { kind: "ready", source: "managed" },
         ],
       ])(
-        "https://github.com/Brevilabs/obsidian-copilot-private/issues/379 classifies a supported %s by ownership",
+        "https://github.com/Brevilabs/obsidian-copilot-private/issues/530 keeps a supported %s runnable by ownership",
         (_label, fields, actualVersion, expected) => {
           mockedResolveSupportedPackage.mockReturnValue({
             entryPath: "/codex/index.js",
             version: actualVersion,
+            runtimeVersion: actualVersion.replace(/-r\d+$/, ""),
           });
 
           expect(
@@ -372,6 +413,19 @@ describe("descriptor", () => {
     });
 
     describe("onPluginLoad()", () => {
+      it("https://github.com/Brevilabs/obsidian-copilot-private/issues/530 checks the shipped pin before completing plugin load", async () => {
+        const automatic = jest.spyOn(getCodexBinaryManager(), "autoUpgrade").mockResolvedValue();
+        try {
+          await CodexBackendDescriptor.onPluginLoad?.({} as CopilotPlugin);
+          expect(automatic).toHaveBeenCalledWith(
+            CODEX_PINNED_VERSION,
+            CODEX_MIN_VERSION,
+            expect.any(Function)
+          );
+        } finally {
+          automatic.mockRestore();
+        }
+      });
       it("https://github.com/Brevilabs/obsidian-copilot-private/issues/368 clears the singleton failure for each plugin lifecycle", async () => {
         const reset = jest.spyOn(getCodexBinaryManager(), "forgetSettledError");
         await CodexBackendDescriptor.onPluginLoad?.({} as CopilotPlugin);

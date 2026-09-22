@@ -1,10 +1,15 @@
+import { assertBinaryCompatible } from "./binaryCompatibility";
 import {
   ManagedInstallAbortError,
   ManagedInstallOperationInFlightError,
   type ManagedInstallRuntimeState,
 } from "@/agentMode/backends/shared/managedInstall";
+import { logWarn } from "@/logger";
 import { requireNodeModule } from "@/utils/desktopRuntime";
 import { validateExecutableFile } from "@/utils/detectBinary";
+
+// Offline reloads retry at most daily; this file is local to the managed runtime directory.
+const AUTOMATIC_UPDATE_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
 
 export interface BinarySettings {
   binaryPath?: string;
@@ -29,6 +34,7 @@ export abstract class ManagedBinaryManager<
   TProgress,
   TOptions extends ManagedBinaryInstallOptions<TProgress> = ManagedBinaryInstallOptions<TProgress>,
 > {
+  private automaticSelection: BinarySettings | null = null;
   private operation: AbortController | null = null;
   private runtimeState: ManagedInstallRuntimeState<TProgress> = { kind: "idle" };
   private readonly subscribers = new Set<() => void>();
@@ -107,6 +113,124 @@ export abstract class ManagedBinaryManager<
       }
       throw error;
     }
+  }
+
+  /**
+   * Updates an existing Copilot-managed installation to this plugin release's
+   * chosen agent version before startup. Retains the previous files
+   * and leaves the selection unchanged if installation fails.
+   * Recent failures delay another attempt on this device unless the target or
+   * minimum supported version changes. Throws if the target version is unsupported.
+   *
+   * @param pin - Agent version chosen for this plugin release, which may be older than the installed version.
+   * @param minimumVersion - Oldest stable agent version this plugin release supports.
+   * @param notify - Receives one success or failure message after an attempted installation.
+   */
+  async autoUpgrade(
+    pin: string,
+    minimumVersion: string,
+    notify: (message: string) => void
+  ): Promise<void> {
+    // A misconfigured release must not install an agent version that Copilot cannot run.
+    // https://github.com/Brevilabs/obsidian-copilot-private/issues/535
+    assertBinaryCompatible(
+      { kind: "installed", version: pin, source: "managed" },
+      minimumVersion,
+      this.displayName
+    );
+    const selected = this.readBinarySettings();
+    // Custom selections and first installs require explicit user intent.
+    // https://github.com/Brevilabs/obsidian-copilot-private/issues/530
+    if (
+      this.isBusy() ||
+      selected.binarySource !== "managed" ||
+      !selected.binaryPath ||
+      !selected.binaryVersion ||
+      selected.binaryVersion === pin
+    )
+      return;
+    const fs = requireNodeModule<typeof import("node:fs")>("fs");
+    const path = requireNodeModule<typeof import("node:path")>("path");
+    if (!fs.existsSync(selected.binaryPath)) return;
+    const failurePath = path.join(this.getDataDir(), "auto-upgrade-failure.json");
+    let attempted = false;
+    try {
+      await this.runExclusive({ kind: "installing", progress: null }, async (signal) => {
+        let failure: { pin?: string; minimumVersion?: string; failedAt?: number } = {};
+        try {
+          failure = JSON.parse(await fs.promises.readFile(failurePath, "utf8"));
+        } catch {
+          /* First attempt or invalid local metadata. */
+        }
+        // A failed network request must not repeat on every reload; a changed pin can retry immediately.
+        // https://github.com/Brevilabs/obsidian-copilot-private/issues/530
+        if (
+          failure?.pin === pin &&
+          // A changed minimum version or a failure record without one must not delay recovery.
+          // https://github.com/Brevilabs/obsidian-copilot-private/issues/535
+          failure.minimumVersion === minimumVersion &&
+          typeof failure.failedAt === "number" &&
+          failure.failedAt <= Date.now() &&
+          Date.now() - failure.failedAt < AUTOMATIC_UPDATE_RETRY_DELAY_MS
+        )
+          return;
+        if (signal.aborted) return;
+        this.automaticSelection = selected;
+        this.assertAutomaticSelection();
+        attempted = true;
+        try {
+          await this.installPipeline({
+            signal,
+            onProgress: (progress: TProgress) => this.publishProgress(progress),
+          } as TOptions & { signal: AbortSignal });
+          await fs.promises
+            .rm(failurePath, { force: true })
+            .catch((error) => logWarn(`[AgentMode] Could not clear update cooldown: ${error}`));
+        } catch (error) {
+          try {
+            await fs.promises.mkdir(this.getDataDir(), { recursive: true });
+            await fs.promises.writeFile(
+              failurePath,
+              JSON.stringify({ pin, minimumVersion, failedAt: Date.now() })
+            );
+          } catch (writeError) {
+            logWarn(`[AgentMode] Could not save update cooldown: ${writeError}`);
+          }
+          throw error;
+        } finally {
+          this.automaticSelection = null;
+        }
+      });
+      if (attempted) notify(`${this.displayName} updated to ${pin}.`);
+    } catch (error) {
+      if (!attempted) return;
+      logWarn(`[AgentMode] Automatic ${this.displayName} update failed: ${error}`);
+      notify(
+        `${this.displayName} could not update. Your runtime selection was kept; retry from Configure.`
+      );
+    } finally {
+      this.automaticSelection = null;
+    }
+  }
+
+  private assertAutomaticSelection(): void {
+    const previous = this.automaticSelection;
+    const current = this.readBinarySettings();
+    // Settings can change outside the manager lock (sync or another plugin lifecycle).
+    // Never replace a selection made while the download was running.
+    // https://github.com/Brevilabs/obsidian-copilot-private/issues/530
+    if (
+      previous &&
+      (current.binaryPath !== previous.binaryPath ||
+        current.binaryVersion !== previous.binaryVersion ||
+        current.binarySource !== previous.binarySource)
+    )
+      throw new ManagedInstallAbortError();
+  }
+
+  protected selectInstalledBinary(settings: BinarySettings): void {
+    this.assertAutomaticSelection();
+    this.updateBinarySettings(settings);
   }
 
   abstract getDataDir(): string;

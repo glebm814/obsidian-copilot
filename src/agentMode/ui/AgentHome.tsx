@@ -956,6 +956,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                 ) : (
                   <>
                     <AgentChatMessages
+                      sourcePath={manager.getSessionSourcePath(sessionId)}
                       key={sessionId}
                       messages={messages}
                       app={app}
