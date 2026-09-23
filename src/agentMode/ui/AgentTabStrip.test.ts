@@ -1,3 +1,16 @@
+const mockConfirmModals: Array<{
+  onConfirm: () => void | Promise<void>;
+  content: string;
+  open: jest.Mock;
+}> = [];
+jest.mock("@/components/modals/ConfirmModal", () => ({
+  ConfirmModal: jest.fn().mockImplementation((_app, onConfirm, content) => {
+    const instance = { onConfirm, content: String(content), open: jest.fn() };
+    mockConfirmModals.push(instance);
+    return instance;
+  }),
+}));
+
 import {
   AgentTabStrip,
   computeVisibleCount,
@@ -5,6 +18,7 @@ import {
 } from "@/agentMode/ui/AgentTabStrip";
 import type { AgentSessionManager } from "@/agentMode/session/AgentSessionManager";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppContext } from "@/context";
 import { refreshLatestVersion } from "@/hooks/useLatestVersion";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
@@ -140,6 +154,52 @@ describe("AgentTabStrip", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "Close session" }));
+
+      expect(manager.detachSessionFromTab).toHaveBeenCalledWith(session.internalId);
+      expect(manager.closeSession).not.toHaveBeenCalled();
+    });
+
+    it("confirms before parking a running tab, then detaches once accepted", () => {
+      mockConfirmModals.length = 0;
+      const session = {
+        internalId: "running",
+        backendId: "test",
+        subscribe: () => () => {},
+        getLabel: () => "Busy chat",
+        getStatus: () => "running",
+        getNeedsAttention: () => false,
+      };
+      const manager = {
+        subscribe: () => () => {},
+        getSessionsForScope: () => [session],
+        getActiveProjectId: () => null,
+        getActiveSession: () => session,
+        getIsStarting: () => false,
+        detachSessionFromTab: jest.fn(),
+        closeSession: jest.fn(),
+      };
+      render(
+        React.createElement(
+          AppContext.Provider,
+          { value: {} as never },
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(AgentTabStrip, {
+              manager: manager as unknown as AgentSessionManager,
+            })
+          )
+        )
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Close session" }));
+
+      // The prompt is informational: nothing is parked until it is accepted.
+      expect(manager.detachSessionFromTab).not.toHaveBeenCalled();
+      expect(mockConfirmModals).toHaveLength(1);
+      expect(mockConfirmModals[0].content).toContain("продолжит выполняться в фоне");
+
+      void mockConfirmModals[0].onConfirm();
 
       expect(manager.detachSessionFromTab).toHaveBeenCalledWith(session.internalId);
       expect(manager.closeSession).not.toHaveBeenCalled();

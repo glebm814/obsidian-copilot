@@ -1,4 +1,5 @@
 import { backendRegistry } from "@/agentMode/backends/registry";
+import { ConfirmModal } from "@/components/modals/ConfirmModal";
 import { TruncatedText } from "@/components/TruncatedText";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AppContext } from "@/context";
 import { refreshLatestVersion } from "@/hooks/useLatestVersion";
 import { cn } from "@/lib/utils";
 import { logError } from "@/logger";
@@ -188,11 +190,29 @@ export const AgentTabStrip: React.FC<Props> = ({ manager }) => {
       .catch((e) => logError("[AgentMode] createSession failed", e));
   }, [manager]);
 
+  const app = React.useContext(AppContext);
   const handleClose = React.useCallback(
     (id: string) => {
-      manager.detachSessionFromTab(id);
+      const detach = () => manager.detachSessionFromTab(id);
+      const session = manager
+        .getSessionsForScope(manager.getActiveProjectId())
+        .find((s) => s.internalId === id);
+      // Closing a tab only parks it — the turn keeps streaming and the session
+      // stays in history — but confirm so a busy tab isn't dismissed unnoticed.
+      if (!app || session?.getStatus() !== "running") {
+        detach();
+        return;
+      }
+      new ConfirmModal(
+        app,
+        detach,
+        "Закрыть вкладку сессии (она продолжит выполняться в фоне)?",
+        "Закрытие вкладки",
+        "Закрыть вкладку",
+        "Отмена"
+      ).open();
     },
-    [manager]
+    [manager, app]
   );
 
   if (sessionCount === 0) return null;

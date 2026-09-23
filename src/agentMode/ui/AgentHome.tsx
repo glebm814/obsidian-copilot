@@ -38,6 +38,7 @@ import type { AgentSessionManager } from "@/agentMode/session/AgentSessionManage
 import { GLOBAL_SCOPE } from "@/agentMode/session/scope";
 import { agentProjectContextLoadAtom, type ProjectConfig } from "@/aiParams";
 import { makeNewProjectConfig } from "@/agentMode/ui/AgentProjectCreateForm";
+import { ConfirmModal } from "@/components/modals/ConfirmModal";
 import { ContextManageModal } from "@/components/modals/project/context-manage-modal";
 import { TruncatedText } from "@/components/TruncatedText";
 import { EVENT_NAMES } from "@/constants";
@@ -266,16 +267,35 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
 
   const handleCloseSession = useCallback(
     async (id: string) => {
-      try {
-        await manager.closeChatSession(id);
-      } catch (error) {
-        logError("[AgentMode] close chat session failed", error);
-        new Notice(
-          `Could not close session: ${error instanceof Error ? error.message : "Try again."}`
-        );
+      const release = async () => {
+        try {
+          await manager.closeChatSession(id);
+        } catch (error) {
+          logError("[AgentMode] close chat session failed", error);
+          new Notice(
+            `Could not close session: ${error instanceof Error ? error.message : "Try again."}`
+          );
+        }
+      };
+      // Unlike parking a tab, this releases the backend, so a turn that is
+      // still streaming is cut short — confirm before dropping that work.
+      if (!app) {
+        await release();
+        return;
       }
+      const isRunning = manager.getRunningChatIds().has(id);
+      new ConfirmModal(
+        app,
+        release,
+        isRunning
+          ? "Сессия ещё выполняется. Закрыть её и прервать текущий ход?"
+          : "Закрыть сессию? История переписки сохранится.",
+        "Закрытие сессии",
+        "Закрыть сессию",
+        "Отмена"
+      ).open();
     },
-    [manager]
+    [manager, app]
   );
 
   // GlobalRecentChatsSection refreshes in an effect keyed to `onLoadHistory`,
