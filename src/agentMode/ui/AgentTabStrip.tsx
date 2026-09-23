@@ -1,7 +1,5 @@
 import { backendRegistry } from "@/agentMode/backends/registry";
-import { ConfirmModal } from "@/components/modals/ConfirmModal";
 import { TruncatedText } from "@/components/TruncatedText";
-import { AppContext } from "@/context";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -190,27 +188,11 @@ export const AgentTabStrip: React.FC<Props> = ({ manager }) => {
       .catch((e) => logError("[AgentMode] createSession failed", e));
   }, [manager]);
 
-  const app = React.useContext(AppContext);
   const handleClose = React.useCallback(
     (id: string) => {
-      const close = () =>
-        manager.closeSession(id).catch((e) => logError("[AgentMode] closeSession failed", e));
-      const session = manager.getSessions().find((s) => s.internalId === id);
-      // Closing a running session cancels its in-flight turn, so ask first.
-      if (!app || session?.getStatus() !== "running") {
-        void close();
-        return;
-      }
-      new ConfirmModal(
-        app,
-        close,
-        `"${session.getLabel() ?? "This session"}" is still running. Stop it and close the tab?`,
-        "Session is still running",
-        "Stop and close",
-        "Cancel"
-      ).open();
+      manager.detachSessionFromTab(id);
     },
-    [manager, app]
+    [manager]
   );
 
   if (sessionCount === 0) return null;

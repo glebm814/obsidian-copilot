@@ -22,6 +22,7 @@ import { ProjectPickerList } from "@/agentMode/ui/ProjectPickerList";
 import { RelevantNotesShelfPanel } from "@/agentMode/ui/RelevantNotesShelfPanel";
 import { useRelevantNotesPaneOpen } from "@/agentMode/ui/useRelevantNotesPaneOpen";
 import { useAgentChatRuntimeState } from "@/agentMode/ui/hooks/useAgentChatRuntimeState";
+import { useManagerSetSnapshot } from "@/agentMode/ui/hooks/useManagerSetSnapshot";
 import { useAgentHistoryControls } from "@/agentMode/ui/hooks/useAgentHistoryControls";
 import type { AgentInputDraftControls } from "@/agentMode/ui/hooks/useAgentInputDrafts";
 import { useAttentionChatIds } from "@/agentMode/ui/hooks/useAttentionChatIds";
@@ -137,12 +138,14 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
   const {
     messages,
     isStarting,
+    isTurnInFlight,
     hasPendingPlanPermission,
     currentPlan,
     currentTodoList,
     pendingToolPermissions,
     pendingAskUserQuestions,
   } = useAgentChatRuntimeState(backend);
+  const isLoading = draft.loading || isTurnInFlight;
 
   // Whole-surface root — the portal container for header-anchored overlays
   // (the project-info popover), which live OUTSIDE chatContainerRef. Held in
@@ -261,6 +264,20 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
     openSourceFile: handleOpenSourceFile,
   } = useAgentHistoryControls(manager, plugin, activeProjectId);
 
+  const handleCloseSession = useCallback(
+    async (id: string) => {
+      try {
+        await manager.closeChatSession(id);
+      } catch (error) {
+        logError("[AgentMode] close chat session failed", error);
+        new Notice(
+          `Could not close session: ${error instanceof Error ? error.message : "Try again."}`
+        );
+      }
+    },
+    [manager]
+  );
+
   // GlobalRecentChatsSection refreshes in an effect keyed to `onLoadHistory`,
   // and a completed load stores a fresh items array that re-renders this
   // component — so this wrapper must not change identity per render, or the
@@ -273,6 +290,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
   // running in the background (the session keeps streaming when its tab is
   // parked), and a live done-dot the moment that turn finishes. Shared by both
   // the global and per-project landing shelves.
+  const openChatIds = useManagerSetSnapshot(manager, (m) => m.getOpenChatIds());
   const runningChatIds = useRunningChatIds(manager);
   const attentionChatIds = useAttentionChatIds(manager);
 
@@ -565,6 +583,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onLoadChat={handleLoadChat}
             onUpdateTitle={handleUpdateChatTitle}
             onDeleteChat={handleDeleteChat}
+            onCloseSession={handleCloseSession}
+            openChatIds={openChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
             runningChatIds={runningChatIds}
@@ -624,6 +644,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleDeleteChat,
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
+      openChatIds,
+      handleCloseSession,
       runningChatIds,
       attentionChatIds,
       isRelevantNotesPaneOpen,
@@ -657,6 +679,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onLoadChat={handleLoadChat}
             onUpdateTitle={handleUpdateChatTitle}
             onDeleteChat={handleDeleteChat}
+            onCloseSession={handleCloseSession}
+            openChatIds={openChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
             runningChatIds={runningChatIds}
@@ -686,6 +710,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleDeleteChat,
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
+      openChatIds,
+      handleCloseSession,
       runningChatIds,
       attentionChatIds,
       settings.chatHistorySortStrategy,
@@ -761,6 +787,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       mainAgentId={mainAgentId}
       updateUserMessageHistory={updateUserMessageHistory}
       isStarting={isStarting}
+      isLoading={isLoading}
       hasPendingPlanPermission={hasPendingPlanPermission}
       modelPickerOverride={modelPickerOverride ?? undefined}
       modePickerOverride={modePickerOverride ?? undefined}
@@ -964,7 +991,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                       pendingToolPermissions={pendingToolPermissions}
                       pendingAskUserQuestions={pendingAskUserQuestions}
                       chatBackend={backend}
-                      isLoading={draft.loading}
+                      isLoading={isLoading}
                     />
                     <AgentChatControls
                       onNewChat={handleNewChat}
@@ -974,6 +1001,9 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                       onLoadChat={handleLoadChat}
                       onUpdateChatTitle={handleUpdateChatTitle}
                       onDeleteChat={handleDeleteChat}
+                      onCloseSession={handleCloseSession}
+                      openChatIds={openChatIds}
+                      runningChatIds={runningChatIds}
                       onOpenSourceFile={handleOpenSourceFile}
                       usageMeter={<AgentContextMeter backend={backend} />}
                       showMultiAgentUpsell
