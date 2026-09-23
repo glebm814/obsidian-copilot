@@ -197,7 +197,7 @@ describe("AgentTabStrip", () => {
       // The prompt is informational: nothing is parked until it is accepted.
       expect(manager.detachSessionFromTab).not.toHaveBeenCalled();
       expect(mockConfirmModals).toHaveLength(1);
-      expect(mockConfirmModals[0].content).toContain("продолжит выполняться в фоне");
+      expect(mockConfirmModals[0].content).toContain("keep running in the background");
 
       void mockConfirmModals[0].onConfirm();
 

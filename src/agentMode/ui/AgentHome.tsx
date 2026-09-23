@@ -288,11 +288,11 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
         app,
         release,
         isRunning
-          ? "Сессия ещё выполняется. Закрыть её и прервать текущий ход?"
-          : "Закрыть сессию? История переписки сохранится.",
-        "Закрытие сессии",
-        "Закрыть сессию",
-        "Отмена"
+          ? "This session is still running. Close it and stop the current turn?"
+          : "Close this session? Its chat history is kept.",
+        "Close session",
+        "Close session",
+        "Cancel"
       ).open();
     },
     [manager, app]

@@ -206,10 +206,10 @@ export const AgentTabStrip: React.FC<Props> = ({ manager }) => {
       new ConfirmModal(
         app,
         detach,
-        "Закрыть вкладку сессии (она продолжит выполняться в фоне)?",
-        "Закрытие вкладки",
-        "Закрыть вкладку",
-        "Отмена"
+        "Close the session tab (it will keep running in the background)?",
+        "Close session tab",
+        "Close tab",
+        "Cancel"
       ).open();
     },
     [manager, app]
