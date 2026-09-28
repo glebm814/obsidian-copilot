@@ -46,6 +46,7 @@ import { ensureMultiAgentEntitlement, showMultiAgentUpgradePrompt } from "@/plus
 import type { App } from "obsidian";
 import { MethodUnsupportedError } from "@/agentMode/session/errors";
 import { deriveChatTitleFromMessages } from "@/agentMode/session/chatHistoryMerge";
+import { replayPersistedMode } from "@/agentMode/session/replayPersistedMode";
 import { ContextProcessor } from "@/contextProcessor";
 import type { ContextMaterializationResult } from "@/context/projectContextMaterializer";
 import { escapeXml } from "@/LLMProviders/chainRunner/utils/xmlParsing";
@@ -402,6 +403,10 @@ export class AgentSession {
   private abortController: AbortController | null = null;
   private listeners = new Set<AgentSessionListener>();
   private unregisterSessionHandler: (() => void) | null = null;
+  // Set by `stopBackendSession`: the backend resource is released but the chat
+  // stays usable, and the next backend call reopens the same session through it.
+  private reopenStoppedBackend: (() => Promise<BackendState>) | null = null;
+  private reopeningBackend: Promise<void> | null = null;
   /**
    * Cached normalized state — produced by the backend at session start /
    * resume / load and refreshed via `state_changed` events or per-dimension
@@ -629,6 +634,7 @@ export class AgentSession {
   async setModel(modelId: string): Promise<void> {
     if (this.getStatus() === "closed") throw new Error("Session is closed");
     if (!this.backendSessionId) throw new Error("Session is still starting");
+    await this.ensureBackendAttached();
     const next = await this.backend.setSessionModel({
       sessionId: this.backendSessionId,
       modelId,
@@ -701,6 +707,7 @@ export class AgentSession {
   async setConfigOption(configId: string, value: string): Promise<void> {
     if (this.getStatus() === "closed") throw new Error("Session is closed");
     if (!this.backendSessionId) throw new Error("Session is still starting");
+    await this.ensureBackendAttached();
     const next = await this.backend.setSessionConfigOption({
       sessionId: this.backendSessionId,
       configId,
@@ -724,6 +731,7 @@ export class AgentSession {
   async setMode(modeId: string): Promise<void> {
     if (this.getStatus() === "closed") throw new Error("Session is closed");
     if (!this.backendSessionId) throw new Error("Session is still starting");
+    await this.ensureBackendAttached();
     const next = await this.backend.setSessionMode({
       sessionId: this.backendSessionId,
       modeId,
@@ -1114,6 +1122,10 @@ export class AgentSession {
         projectContextUpdatesBlock
       );
 
+      // Only a stopped session takes this async hop; an attached one keeps
+      // `backend.prompt` synchronous with the turn, as noted above.
+      if (this.reopenStoppedBackend) await this.ensureBackendAttached();
+
       const req: PromptInput = {
         sessionId,
         prompt: promptBlocks,
@@ -1383,6 +1395,8 @@ export class AgentSession {
 
   /** Release the allocated backend session. */
   async releaseBackendSession(): Promise<void> {
+    // A stopped session already gave its backend resource back.
+    if (this.reopenStoppedBackend) return;
     const backendSessionId = this.backendSessionId;
     if (!backendSessionId || !this.backend.closeSession) {
       throw new Error("This agent does not support closing individual sessions.");
@@ -1395,6 +1409,63 @@ export class AgentSession {
       }
       throw error;
     }
+  }
+
+  /** Whether the backend session was stopped and will be reopened on the next backend call. */
+  isBackendStopped(): boolean {
+    return this.reopenStoppedBackend !== null;
+  }
+
+  /**
+   * Stop the backend session while keeping this chat on screen. Cancels any
+   * in-flight turn and releases the backend resource; the transcript, label
+   * and composer stay, and the next prompt or picker change reopens the same
+   * backend session through `reopen` before talking to the backend.
+   * @param reopen Rebinds this session's backend id and returns its fresh state.
+   */
+  async stopBackendSession(reopen: () => Promise<BackendState>): Promise<void> {
+    if (this.reopenStoppedBackend || this.disposed) return;
+    await this.cancel();
+    await this.releaseBackendSession();
+    this.unregisterSessionHandler?.();
+    this.unregisterSessionHandler = null;
+    this.reopenStoppedBackend = reopen;
+  }
+
+  /** Reopen a stopped backend session; a no-op while the backend is attached. */
+  private async ensureBackendAttached(): Promise<void> {
+    const reopen = this.reopenStoppedBackend;
+    if (!reopen) return;
+    this.reopeningBackend ??= this.reattachStoppedBackend(reopen).finally(() => {
+      this.reopeningBackend = null;
+    });
+    await this.reopeningBackend;
+  }
+
+  private async reattachStoppedBackend(reopen: () => Promise<BackendState>): Promise<void> {
+    const sessionId = this.backendSessionId!;
+    const previous = this.currentState;
+    const state = await reopen();
+    if (this.disposed) {
+      // Closed while reopening: give the resource straight back.
+      await this.backend.closeSession?.({ sessionId }).catch((e) => {
+        logWarn(`[AgentMode] release after reopen failed`, e);
+      });
+      return;
+    }
+    this.unregisterSessionHandler = this.backend.registerSessionHandler(sessionId, (event) =>
+      this.handleSessionEvent(event)
+    );
+    // Cleared before re-applying the picker state below, which goes through
+    // `setModel`/`setMode` and would otherwise wait on this very reopen.
+    this.reopenStoppedBackend = null;
+    this.currentState = state;
+    this.notifyModelChanged();
+    // A reopened backend session starts on its defaults; restore what the user
+    // had picked before stopping it.
+    const selection = previous?.model?.current;
+    if (selection) await this.confirmSeededSelection(selection, state);
+    await replayPersistedMode(this, previous?.mode?.current ?? null);
   }
 
   /** Detach from the backend. Does not cancel — call `cancel()` first. */

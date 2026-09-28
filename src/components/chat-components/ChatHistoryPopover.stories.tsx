@@ -28,7 +28,7 @@ const OpenPopover: React.FC<{ isRunning?: boolean }> = ({ isRunning = false }) =
       chatHistory={CHAT_HISTORY}
       openChatIds={OPEN_CHAT_IDS}
       runningChatIds={isRunning ? OPEN_CHAT_IDS : undefined}
-      onCloseSession={async () => {}}
+      onStopSession={async () => {}}
       onUpdateTitle={async () => {}}
       onDeleteChat={async () => {}}
       onLoadChat={async () => {}}

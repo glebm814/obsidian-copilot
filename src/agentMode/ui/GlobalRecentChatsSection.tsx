@@ -69,7 +69,7 @@ interface GlobalRecentChatsSectionProps {
    */
   runningChatIds?: ReadonlySet<string>;
   openChatIds?: ReadonlySet<string>;
-  onCloseSession?: (id: string) => Promise<void>;
+  onStopSession?: (id: string) => Promise<void>;
   /**
    * Recent-list ids whose live session is flagging needs-attention. OR'd with
    * each item's baked-in `needsAttention` snapshot so the done-dot appears the
@@ -157,7 +157,7 @@ interface RecentChatRowProps {
   /** Whether this chat's backend turn is running in the background. */
   isRunning: boolean;
   isSessionOpen: boolean;
-  onCloseSession?: (id: string) => Promise<void>;
+  onStopSession?: (id: string) => Promise<void>;
   /** Snapshot ∪ live needs-attention — drives the icon tile's done-dot. */
   hasAttention: boolean;
 }
@@ -186,7 +186,7 @@ const RecentChatRow = memo(function RecentChatRow({
   onOpenSourceFile,
   isRunning,
   isSessionOpen,
-  onCloseSession,
+  onStopSession,
   hasAttention,
 }: RecentChatRowProps): React.ReactElement {
   const Icon = resolveChatIcon(item) ?? MessageCircle;
@@ -295,16 +295,16 @@ const RecentChatRow = memo(function RecentChatRow({
             </>
           ) : (
             <>
-              {isSessionOpen && onCloseSession && (
+              {isSessionOpen && onStopSession && (
                 <Button
                   size="sm"
                   variant="ghost"
                   className="tw-size-5 tw-p-0"
-                  aria-label="Close session"
-                  title="Close session"
+                  aria-label="Stop session"
+                  title="Stop session"
                   onClick={(event) => {
                     event.stopPropagation();
-                    safeAsyncHandler(onCloseSession)(item.id);
+                    safeAsyncHandler(onStopSession)(item.id);
                   }}
                 >
                   <Power className="tw-size-3" />
@@ -379,7 +379,7 @@ export const GlobalRecentChatsSection = memo(function GlobalRecentChatsSection({
   onLoadHistory,
   runningChatIds,
   openChatIds,
-  onCloseSession,
+  onStopSession,
   attentionChatIds,
   projectNamesById,
   sortStrategy = "recent",
@@ -529,7 +529,7 @@ export const GlobalRecentChatsSection = memo(function GlobalRecentChatsSection({
                 onOpenSourceFile={handleOpenSourceFile}
                 isRunning={runningChatIds?.has(item.id) ?? false}
                 isSessionOpen={openChatIds?.has(item.id) ?? false}
-                onCloseSession={onCloseSession}
+                onStopSession={onStopSession}
                 hasAttention={!!item.needsAttention || (attentionChatIds?.has(item.id) ?? false)}
               />
             ))}

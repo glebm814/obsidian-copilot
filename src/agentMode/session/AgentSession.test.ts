@@ -1627,6 +1627,82 @@ describe("AgentSession.releaseBackendSession", () => {
   );
 });
 
+describe("AgentSession.stopBackendSession", () => {
+  function setupStoppedSession() {
+    const mock = makeMockBackend();
+    const session = new AgentSession({
+      backend: mock.asBackend,
+      backendSessionId: "acp-1",
+      internalId: "internal-1",
+      backendId: "opencode",
+    });
+    const reopen = jest.fn(async () => emptyState());
+    return { mock, session, reopen };
+  }
+
+  it("releases the backend but keeps the transcript and an idle, sendable chat", async () => {
+    const { mock, session, reopen } = setupStoppedSession();
+    await session.sendPrompt("first question").turn;
+    const transcript = session.store.getDisplayMessages();
+
+    await session.stopBackendSession(reopen);
+
+    expect(mock.closeSession).toHaveBeenCalledWith({ sessionId: "acp-1" });
+    expect(session.isBackendStopped()).toBe(true);
+    expect(session.getStatus()).toBe("idle");
+    expect(session.store.getDisplayMessages()).toEqual(transcript);
+    expect(reopen).not.toHaveBeenCalled();
+  });
+
+  it("reopens the same backend session before the next prompt", async () => {
+    const { mock, session, reopen } = setupStoppedSession();
+    await session.stopBackendSession(reopen);
+
+    await session.sendPrompt("follow-up").turn;
+
+    expect(reopen).toHaveBeenCalledTimes(1);
+    expect(mock.registerHandler).toHaveBeenLastCalledWith("acp-1", expect.any(Function));
+    expect(mock.prompt).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "acp-1" }));
+    expect(session.isBackendStopped()).toBe(false);
+    // A second stop releases again rather than treating the session as already stopped.
+    await session.stopBackendSession(reopen);
+    expect(mock.closeSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("reopens before a picker change reaches the backend", async () => {
+    const { mock, session, reopen } = setupStoppedSession();
+    await session.stopBackendSession(reopen);
+
+    await session.setMode("plan");
+
+    expect(reopen).toHaveBeenCalledTimes(1);
+    expect(mock.setSessionMode).toHaveBeenCalledWith({ sessionId: "acp-1", modeId: "plan" });
+  });
+
+  it("surfaces a failed reopen on the turn and retries on the next send", async () => {
+    const { mock, session, reopen } = setupStoppedSession();
+    reopen.mockRejectedValueOnce(new Error("agent gone"));
+    await session.stopBackendSession(reopen);
+
+    await session.sendPrompt("follow-up").turn.catch(() => undefined);
+    expect(mock.prompt).not.toHaveBeenCalled();
+    expect(session.isBackendStopped()).toBe(true);
+
+    await session.sendPrompt("again").turn;
+    expect(reopen).toHaveBeenCalledTimes(2);
+    expect(mock.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not release twice when closed after being stopped", async () => {
+    const { mock, session, reopen } = setupStoppedSession();
+    await session.stopBackendSession(reopen);
+
+    await session.releaseBackendSession();
+
+    expect(mock.closeSession).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("withReadOnlyPreamble", () => {
   it("leads the first text block with the read-only instruction", () => {
     const out = withReadOnlyPreamble([{ type: "text", text: "the question" }]);

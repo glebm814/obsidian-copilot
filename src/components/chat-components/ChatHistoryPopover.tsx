@@ -55,7 +55,7 @@ interface ChatHistoryPopoverProps {
   chatHistory: ChatHistoryItem[];
   openChatIds?: ReadonlySet<string>;
   runningChatIds?: ReadonlySet<string>;
-  onCloseSession?: (id: string) => Promise<void>;
+  onStopSession?: (id: string) => Promise<void>;
   onUpdateTitle: (id: string, newTitle: string) => Promise<void>;
   onDeleteChat: (id: string) => Promise<void>;
   onLoadChat?: (id: string) => Promise<void>;
@@ -84,7 +84,7 @@ export function ChatHistoryPopover({
   chatHistory,
   openChatIds,
   runningChatIds,
-  onCloseSession,
+  onStopSession,
   onUpdateTitle,
   onDeleteChat,
   onLoadChat,
@@ -331,6 +331,17 @@ export function ChatHistoryPopover({
         align={align}
         side={side}
         collisionPadding={16}
+        // A row action's confirmation opens as an Obsidian modal; focus and
+        // clicks there must not dismiss the list the user is working in.
+        onInteractOutside={(event) => {
+          if (event.target instanceof Element && event.target.closest(".modal-container")) {
+            event.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(event) => {
+          // Escape cancels that modal, not the list beneath it.
+          if (activeDocument.querySelector(".modal-container")) event.preventDefault();
+        }}
       >
         <div className="tw-flex tw-max-h-[400px] tw-flex-col">
           <div className="tw-shrink-0 tw-border-b tw-p-1">
@@ -361,7 +372,7 @@ export function ChatHistoryPopover({
                             chat={chat}
                             isSessionOpen={openChatIds?.has(chat.id) ?? false}
                             isRunning={runningChatIds?.has(chat.id) ?? false}
-                            onCloseSession={onCloseSession}
+                            onStopSession={onStopSession}
                             isEditing={editingId === chat.id}
                             editingTitle={editingTitle}
                             onEditingTitleChange={setEditingTitle}
@@ -406,7 +417,7 @@ interface ChatHistoryItemProps {
   chat: ChatHistoryItem;
   isSessionOpen: boolean;
   isRunning: boolean;
-  onCloseSession?: (id: string) => Promise<void>;
+  onStopSession?: (id: string) => Promise<void>;
   isEditing: boolean;
   editingTitle: string;
   onEditingTitleChange: (title: string) => void;
@@ -427,7 +438,7 @@ function ChatHistoryItem({
   chat,
   isSessionOpen,
   isRunning,
-  onCloseSession,
+  onStopSession,
   isEditing,
   editingTitle,
   onEditingTitleChange,
@@ -551,16 +562,16 @@ function ChatHistoryItem({
         ) : (
           // Show edit and delete buttons
           <>
-            {isSessionOpen && onCloseSession && (
+            {isSessionOpen && onStopSession && (
               <Button
                 size="sm"
                 variant="ghost"
                 className="tw-size-5 tw-p-0"
-                aria-label="Close session"
-                title="Close session"
+                aria-label="Stop session"
+                title="Stop session"
                 onClick={(event) => {
                   event.stopPropagation();
-                  safeAsyncHandler(onCloseSession)(chat.id);
+                  safeAsyncHandler(onStopSession)(chat.id);
                 }}
               >
                 <Power className="tw-size-3" />

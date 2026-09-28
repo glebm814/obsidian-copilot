@@ -265,15 +265,15 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
     openSourceFile: handleOpenSourceFile,
   } = useAgentHistoryControls(manager, plugin, activeProjectId);
 
-  const handleCloseSession = useCallback(
+  const handleStopSession = useCallback(
     async (id: string) => {
       const release = async () => {
         try {
-          await manager.closeChatSession(id);
+          await manager.stopChatSession(id);
         } catch (error) {
-          logError("[AgentMode] close chat session failed", error);
+          logError("[AgentMode] stop chat session failed", error);
           new Notice(
-            `Could not close session: ${error instanceof Error ? error.message : "Try again."}`
+            `Could not stop session: ${error instanceof Error ? error.message : "Try again."}`
           );
         }
       };
@@ -288,10 +288,10 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
         app,
         release,
         isRunning
-          ? "This session is still running. Close it and stop the current turn?"
-          : "Close this session? Its chat history is kept.",
-        "Close session",
-        "Close session",
+          ? "This session is still running. Stop it and cancel the current turn?"
+          : "Stop this session? The chat stays open and resumes when you send a message.",
+        "Stop session",
+        "Stop session",
         "Cancel"
       ).open();
     },
@@ -603,7 +603,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onLoadChat={handleLoadChat}
             onUpdateTitle={handleUpdateChatTitle}
             onDeleteChat={handleDeleteChat}
-            onCloseSession={handleCloseSession}
+            onStopSession={handleStopSession}
             openChatIds={openChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
@@ -665,7 +665,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
       openChatIds,
-      handleCloseSession,
+      handleStopSession,
       runningChatIds,
       attentionChatIds,
       isRelevantNotesPaneOpen,
@@ -699,7 +699,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onLoadChat={handleLoadChat}
             onUpdateTitle={handleUpdateChatTitle}
             onDeleteChat={handleDeleteChat}
-            onCloseSession={handleCloseSession}
+            onStopSession={handleStopSession}
             openChatIds={openChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
@@ -731,7 +731,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
       openChatIds,
-      handleCloseSession,
+      handleStopSession,
       runningChatIds,
       attentionChatIds,
       settings.chatHistorySortStrategy,
@@ -1021,7 +1021,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                       onLoadChat={handleLoadChat}
                       onUpdateChatTitle={handleUpdateChatTitle}
                       onDeleteChat={handleDeleteChat}
-                      onCloseSession={handleCloseSession}
+                      onStopSession={handleStopSession}
                       openChatIds={openChatIds}
                       runningChatIds={runningChatIds}
                       onOpenSourceFile={handleOpenSourceFile}

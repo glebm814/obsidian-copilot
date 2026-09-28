@@ -871,24 +871,70 @@ export class AgentSessionManager {
       // A starting or failed session has no backend resource for the user to close.
       // https://github.com/Brevilabs/obsidian-copilot-private/issues/429
       if (!session.getBackendSessionId()) continue;
+      // A stopped chat stays on screen but holds no backend resource.
+      if (session.isBackendStopped()) continue;
       for (const id of this.recentChatIdsForSession(internalId, session)) ids.add(id);
     }
     return ids.size === 0 ? EMPTY_RECENT_CHAT_IDS : ids;
   }
 
   /**
-   * Release an open conversation without deleting its saved history.
+   * Stop an open conversation's backend session without closing its chat or
+   * deleting its saved history. A chat on the tab strip stays where it is and
+   * reopens the same backend session on its next send; a chat already parked
+   * off the strip has nothing on screen to keep, so it is released and dropped.
    * @param historyId The markdown path or native chat identity shown in history.
    */
-  async closeChatSession(historyId: string): Promise<void> {
+  async stopChatSession(historyId: string): Promise<void> {
     for (const [internalId, session] of this.sessions) {
       // History can still display the native identity after the first autosave.
       // https://github.com/Brevilabs/obsidian-copilot-private/issues/429
-      if (this.recentChatIdsForSession(internalId, session).includes(historyId)) {
+      if (!this.recentChatIdsForSession(internalId, session).includes(historyId)) continue;
+      if (this.detachedFromTabIds.has(internalId)) {
         await this.closeSession(internalId, { releaseBackend: true });
         return;
       }
+      await session.stopBackendSession(() => this.reopenStoppedBackendSession(session));
+      // Flush the transcript as it stood when the session was stopped.
+      await this.drainAutoSave(session);
+      this.notify();
+      return;
     }
+  }
+
+  /**
+   * Rebind a stopped session's backend id on the process it ran on. Prefers
+   * `resumeSession`, which needs no transcript replay (the chat already shows
+   * it), and falls back to `loadSession`, discarding the replayed transcript.
+   * @param session The stopped session being reopened.
+   */
+  private async reopenStoppedBackendSession(session: AgentSession): Promise<BackendState> {
+    const backend = this.backends.get(session.backendId);
+    const sessionId = session.getBackendSessionId();
+    if (!backend || !sessionId) {
+      throw new Error("The agent for this chat is not running. Reopen the chat from history.");
+    }
+    const { projectId } = session;
+    const cwd = this.resolveSessionCwd(projectId);
+    // Same searchable roots a history resume forwards; never rejects.
+    const additionalDirectories =
+      projectId === GLOBAL_SCOPE
+        ? undefined
+        : (
+            await this.beginContextMaterialization(
+              projectId,
+              cwd,
+              undefined,
+              this.currentContextRevisionKey(projectId)
+            )
+          ).additionalDirectories;
+    const params = { sessionId, cwd, projectId, additionalDirectories };
+    try {
+      return (await backend.resumeSession(params)).state;
+    } catch (err) {
+      if (!(err instanceof MethodUnsupportedError)) throw err;
+    }
+    return (await backend.loadSession(params)).state;
   }
 
   /**

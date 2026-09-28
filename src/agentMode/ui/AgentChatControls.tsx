@@ -30,7 +30,7 @@ interface AgentChatControlsProps {
   onLoadChat?: (id: string) => Promise<void>;
   onUpdateChatTitle?: (id: string, newTitle: string) => Promise<void>;
   onDeleteChat?: (id: string) => Promise<void>;
-  onCloseSession?: (id: string) => Promise<void>;
+  onStopSession?: (id: string) => Promise<void>;
   openChatIds?: ReadonlySet<string>;
   runningChatIds?: ReadonlySet<string>;
   onOpenSourceFile?: (id: string) => Promise<void>;
@@ -68,7 +68,7 @@ export const AgentChatControls: React.FC<AgentChatControlsProps> = ({
   onLoadChat,
   onUpdateChatTitle,
   onDeleteChat,
-  onCloseSession,
+  onStopSession,
   openChatIds,
   runningChatIds,
   onOpenSourceFile,
@@ -138,7 +138,7 @@ export const AgentChatControls: React.FC<AgentChatControlsProps> = ({
               chatHistory={chatHistoryItems!}
               onUpdateTitle={onUpdateChatTitle!}
               onDeleteChat={onDeleteChat!}
-              onCloseSession={onCloseSession}
+              onStopSession={onStopSession}
               openChatIds={openChatIds}
               runningChatIds={runningChatIds}
               onLoadChat={onLoadChat}

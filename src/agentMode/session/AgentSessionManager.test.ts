@@ -210,6 +210,10 @@ function makeMockSession(overrides: {
     backend: overrides.backend,
     backendSessionId: sessionId,
     releaseBackendSession: AgentSession.prototype.releaseBackendSession,
+    stopBackendSession: AgentSession.prototype.stopBackendSession,
+    isBackendStopped: AgentSession.prototype.isBackendStopped,
+    reopenStoppedBackend: null,
+    unregisterSessionHandler: null,
     dispose: mockSessionDispose,
     setModel: jest.fn(),
     setMode: jest.fn(),
@@ -461,7 +465,7 @@ describe("AgentSessionManager", () => {
         const idleId = buildNativeChatId(idle.backendId, idle.getBackendSessionId()!);
         const runningId = buildNativeChatId(running.backendId, running.getBackendSessionId()!);
         expect(mgr.getOpenChatIds()).toEqual(new Set([idleId, runningId]));
-        await mgr.closeChatSession(idleId);
+        await mgr.stopChatSession(idleId);
         expect(mgr.getOpenChatIds()).toEqual(new Set([runningId]));
       });
     });
@@ -484,8 +488,8 @@ describe("AgentSessionManager", () => {
       });
     });
 
-    describe("closeChatSession()", () => {
-      it("closes by saved or stale native identity and retains the saved transcript for https://github.com/Brevilabs/obsidian-copilot-private/issues/429", async () => {
+    describe("stopChatSession()", () => {
+      it("stops by saved or stale native identity, keeps the chat on its tab, and retains the saved transcript", async () => {
         for (const useNativeId of [false, true]) {
           const saved = new Map<string, unknown>();
           const persistence = {
@@ -501,30 +505,50 @@ describe("AgentSessionManager", () => {
             >[2]["persistenceManager"]
           );
           const session = await mgr.createSession();
+          const proc = mgr.getBackendProcess(session.backendId)!;
           getSessionTestHandle(session).setMessages([{ message: "Initial answer" }]);
           await mgr.saveActiveSession();
           const nativeId = buildNativeChatId(session.backendId, session.getBackendSessionId()!);
           expect(mgr.getOpenChatIds()).toEqual(new Set([nativeId, "chats/research.md"]));
-          await mgr.closeChatSession(useNativeId ? nativeId : "chats/research.md");
+          await mgr.stopChatSession(useNativeId ? nativeId : "chats/research.md");
+          expect(proc.closeSession).toHaveBeenCalledWith({
+            sessionId: session.getBackendSessionId(),
+          });
           expect(saved.get("chats/research.md")).toEqual([{ message: "Initial answer" }]);
           expect(mgr.getOpenChatIds().size).toBe(0);
-          expect(mgr.getSessions()).toEqual([]);
+          expect(mgr.getSessions()).toEqual([session]);
+          expect(mgr.getActiveSession()).toBe(session);
+          expect(mockSessionDispose).not.toHaveBeenCalled();
         }
       });
 
-      it("releases only the selected backend session while preserving another active chat for https://github.com/Brevilabs/obsidian-copilot-private/issues/429", async () => {
+      it("releases only the selected backend session and leaves every tab in place", async () => {
         const mgr = buildManager();
         const selected = await mgr.createSession();
         const sibling = await mgr.createSession();
         const proc = mgr.getBackendProcess(selected.backendId)!;
         const id = buildNativeChatId(selected.backendId, selected.getBackendSessionId()!);
-        await mgr.closeChatSession(id);
+        await mgr.stopChatSession(id);
+        expect(proc.closeSession).toHaveBeenCalledTimes(1);
         expect(proc.closeSession).toHaveBeenCalledWith({
           sessionId: selected.getBackendSessionId(),
         });
-        expect(mgr.getSessions()).toEqual([sibling]);
+        expect(mgr.getSessions()).toEqual([selected, sibling]);
         expect(mgr.getActiveSession()).toBe(sibling);
         expect(proc.shutdown).not.toHaveBeenCalled();
+      });
+
+      it("drops a chat already parked off the tab strip, since nothing of it is on screen", async () => {
+        const mgr = buildManager();
+        const session = await mgr.createSession();
+        const proc = mgr.getBackendProcess(session.backendId)!;
+        const id = buildNativeChatId(session.backendId, session.getBackendSessionId()!);
+        mgr.detachSessionFromTab(session.internalId);
+        await mgr.stopChatSession(id);
+        expect(proc.closeSession).toHaveBeenCalledWith({
+          sessionId: session.getBackendSessionId(),
+        });
+        expect(mgr.getSessions()).toEqual([]);
       });
     });
 

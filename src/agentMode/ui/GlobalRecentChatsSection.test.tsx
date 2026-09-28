@@ -10,12 +10,12 @@ const noop = async () => {};
 function renderSection(
   props: Partial<React.ComponentProps<typeof GlobalRecentChatsSection>> & {
     openChatIds?: ReadonlySet<string>;
-    onCloseSession?: (id: string) => Promise<void>;
+    onStopSession?: (id: string) => Promise<void>;
   } = {}
 ) {
   return render(
     <GlobalRecentChatsSection
-      {...{ openChatIds: props.openChatIds, onCloseSession: props.onCloseSession }}
+      {...{ openChatIds: props.openChatIds, onStopSession: props.onStopSession }}
       items={props.items ?? []}
       variant={props.variant}
       title={props.title}
@@ -83,12 +83,12 @@ describe("GlobalRecentChatsSection", () => {
     it("https://github.com/Brevilabs/obsidian-copilot-private/issues/429 shows open sessions and retains saved chats after close", async () => {
       const onLoadChat = jest.fn(noop);
       const onDeleteChat = jest.fn(noop);
-      const onCloseSession = jest.fn(noop);
+      const onStopSession = jest.fn(noop);
       renderSection({
         items: [makeItem("idle"), makeItem("running"), makeItem("closed")],
         openChatIds: new Set(["idle", "running"]),
         runningChatIds: new Set(["running"]),
-        onCloseSession,
+        onStopSession,
         onLoadChat,
         onDeleteChat,
       });
@@ -96,13 +96,13 @@ describe("GlobalRecentChatsSection", () => {
       expect(liveDots).toHaveLength(2);
       expect(liveDots[0].parentElement?.getAttribute("title")).toBe("Session is running");
       expect(screen.getByLabelText("Responding")).toBeTruthy();
-      const buttons = screen.getAllByRole("button", { name: "Close session" });
+      const buttons = screen.getAllByRole("button", { name: "Stop session" });
       expect(buttons).toHaveLength(2);
       fireEvent.keyDown(buttons[0], { key: "Enter" });
       await act(async () => {
         fireEvent.click(buttons[0]);
       });
-      expect(onCloseSession).toHaveBeenCalledTimes(1);
+      expect(onStopSession).toHaveBeenCalledTimes(1);
       expect(onLoadChat).not.toHaveBeenCalled();
       expect(onDeleteChat).not.toHaveBeenCalled();
       expect(screen.getByText("Chat idle")).toBeTruthy();

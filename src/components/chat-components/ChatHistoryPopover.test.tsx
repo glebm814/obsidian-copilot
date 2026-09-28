@@ -23,7 +23,7 @@ describe("ChatHistoryPopover", () => {
   });
   describe("ChatHistoryPopover()", () => {
     it(`${issue} closes an open session while preserving its saved history and leaving the popover open`, async () => {
-      const onCloseSession = jest.fn(async () => {});
+      const onStopSession = jest.fn(async () => {});
       const onLoadChat = jest.fn(async () => {});
       const onDeleteChat = jest.fn(async () => {});
       const props = {
@@ -31,7 +31,7 @@ describe("ChatHistoryPopover", () => {
         onUpdateTitle: jest.fn(),
         onDeleteChat,
         onLoadChat,
-        onCloseSession,
+        onStopSession,
       };
       const { rerender } = render(
         <ChatHistoryPopover {...props} openChatIds={new Set([history[0].id])}>
@@ -40,10 +40,10 @@ describe("ChatHistoryPopover", () => {
       );
       fireEvent.click(screen.getByText("History"));
       expect(screen.getAllByLabelText("Session live")).toHaveLength(1);
-      const button = screen.getByRole("button", { name: "Close session" });
+      const button = screen.getByRole("button", { name: "Stop session" });
       fireEvent.keyDown(button, { key: "Enter" });
       await act(async () => fireEvent.click(button));
-      expect(onCloseSession).toHaveBeenCalledWith(history[0].id);
+      expect(onStopSession).toHaveBeenCalledWith(history[0].id);
       expect(onLoadChat).not.toHaveBeenCalled();
       expect(onDeleteChat).not.toHaveBeenCalled();
       rerender(
@@ -52,7 +52,7 @@ describe("ChatHistoryPopover", () => {
         </ChatHistoryPopover>
       );
       expect(screen.queryByLabelText("Session live")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Close session" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Stop session" })).toBeNull();
       expect(screen.getByText("Open research")).toBeTruthy();
       expect(screen.getByText("Saved research")).toBeTruthy();
       await act(async () =>
@@ -67,7 +67,7 @@ describe("ChatHistoryPopover", () => {
           chatHistory={history}
           openChatIds={new Set(history.map((chat) => chat.id))}
           runningChatIds={new Set([history[0].id])}
-          onCloseSession={async () => {}}
+          onStopSession={async () => {}}
           onUpdateTitle={async () => {}}
           onDeleteChat={async () => {}}
           onLoadChat={async () => {}}
