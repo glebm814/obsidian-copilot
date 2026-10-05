@@ -311,6 +311,8 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
   // parked), and a live done-dot the moment that turn finishes. Shared by both
   // the global and per-project landing shelves.
   const openChatIds = useManagerSetSnapshot(manager, (m) => m.getOpenChatIds());
+  // Outlines the row of the chat currently on screen.
+  const activeChatIds = useManagerSetSnapshot(manager, (m) => m.getActiveChatIds());
   const runningChatIds = useRunningChatIds(manager);
   const attentionChatIds = useAttentionChatIds(manager);
 
@@ -605,6 +607,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onDeleteChat={handleDeleteChat}
             onStopSession={handleStopSession}
             openChatIds={openChatIds}
+            activeChatIds={activeChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
             runningChatIds={runningChatIds}
@@ -665,6 +668,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
       openChatIds,
+      activeChatIds,
       handleStopSession,
       runningChatIds,
       attentionChatIds,
@@ -701,6 +705,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
             onDeleteChat={handleDeleteChat}
             onStopSession={handleStopSession}
             openChatIds={openChatIds}
+            activeChatIds={activeChatIds}
             onOpenSourceFile={handleOpenSourceFile}
             onLoadHistory={handleLoadChatHistorySafely}
             runningChatIds={runningChatIds}
@@ -731,6 +736,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
       handleOpenSourceFile,
       handleLoadChatHistorySafely,
       openChatIds,
+      activeChatIds,
       handleStopSession,
       runningChatIds,
       attentionChatIds,

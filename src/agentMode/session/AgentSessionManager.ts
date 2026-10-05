@@ -879,6 +879,18 @@ export class AgentSessionManager {
   }
 
   /**
+   * Recent-list identities of the active session, so the landing list can mark
+   * the chat currently on screen. Empty until the chat has a history row.
+   */
+  getActiveChatIds(): ReadonlySet<string> {
+    const id = this.activeSessionId;
+    const session = id ? this.sessions.get(id) : undefined;
+    if (!id || !session) return EMPTY_RECENT_CHAT_IDS;
+    const ids = this.recentChatIdsForSession(id, session);
+    return ids.length === 0 ? EMPTY_RECENT_CHAT_IDS : new Set(ids);
+  }
+
+  /**
    * Stop an open conversation's backend session without closing its chat or
    * deleting its saved history. A chat on the tab strip stays where it is and
    * reopens the same backend session on its next send; a chat already parked

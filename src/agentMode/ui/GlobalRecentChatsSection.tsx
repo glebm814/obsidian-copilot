@@ -69,6 +69,8 @@ interface GlobalRecentChatsSectionProps {
    */
   runningChatIds?: ReadonlySet<string>;
   openChatIds?: ReadonlySet<string>;
+  /** Recent-list ids of the chat currently on screen; its row gets an outline. */
+  activeChatIds?: ReadonlySet<string>;
   onStopSession?: (id: string) => Promise<void>;
   /**
    * Recent-list ids whose live session is flagging needs-attention. OR'd with
@@ -157,6 +159,8 @@ interface RecentChatRowProps {
   /** Whether this chat's backend turn is running in the background. */
   isRunning: boolean;
   isSessionOpen: boolean;
+  /** Whether this row is the chat currently on screen. */
+  isActive: boolean;
   onStopSession?: (id: string) => Promise<void>;
   /** Snapshot ∪ live needs-attention — drives the icon tile's done-dot. */
   hasAttention: boolean;
@@ -186,6 +190,7 @@ const RecentChatRow = memo(function RecentChatRow({
   onOpenSourceFile,
   isRunning,
   isSessionOpen,
+  isActive,
   onStopSession,
   hasAttention,
 }: RecentChatRowProps): React.ReactElement {
@@ -221,8 +226,12 @@ const RecentChatRow = memo(function RecentChatRow({
       tabIndex={0}
       className={cn(
         "tw-group tw-flex tw-min-h-9 tw-cursor-pointer tw-items-center tw-gap-2 tw-rounded-md tw-px-2 tw-py-1.5",
-        "tw-text-left tw-transition-colors hover:tw-bg-modifier-hover"
+        "tw-text-left tw-transition-colors hover:tw-bg-modifier-hover",
+        // Same blue as the "Session is running" dot. An inset shadow rather than
+        // a border, so the list's divide-y separators keep their widths.
+        isActive && "tw-shadow-[inset_0_0_0_1px_var(--color-blue)]"
       )}
+      aria-current={isActive ? "true" : undefined}
       onClick={() => onOpen(item.id)}
       onKeyDown={(e) => {
         // Only the row itself opens on Enter/Space. Without this, a keydown on
@@ -379,6 +388,7 @@ export const GlobalRecentChatsSection = memo(function GlobalRecentChatsSection({
   onLoadHistory,
   runningChatIds,
   openChatIds,
+  activeChatIds,
   onStopSession,
   attentionChatIds,
   projectNamesById,
@@ -529,6 +539,7 @@ export const GlobalRecentChatsSection = memo(function GlobalRecentChatsSection({
                 onOpenSourceFile={handleOpenSourceFile}
                 isRunning={runningChatIds?.has(item.id) ?? false}
                 isSessionOpen={openChatIds?.has(item.id) ?? false}
+                isActive={activeChatIds?.has(item.id) ?? false}
                 onStopSession={onStopSession}
                 hasAttention={!!item.needsAttention || (attentionChatIds?.has(item.id) ?? false)}
               />

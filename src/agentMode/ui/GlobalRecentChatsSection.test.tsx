@@ -21,6 +21,7 @@ function renderSection(
       title={props.title}
       runningChatIds={props.runningChatIds}
       attentionChatIds={props.attentionChatIds}
+      activeChatIds={props.activeChatIds}
       projectNamesById={props.projectNamesById}
       sortStrategy={props.sortStrategy}
       onLoadChat={props.onLoadChat ?? noop}
@@ -106,6 +107,19 @@ describe("GlobalRecentChatsSection", () => {
       expect(onLoadChat).not.toHaveBeenCalled();
       expect(onDeleteChat).not.toHaveBeenCalled();
       expect(screen.getByText("Chat idle")).toBeTruthy();
+    });
+
+    it("outlines only the row of the chat currently on screen", () => {
+      renderSection({
+        items: [makeItem("current"), makeItem("other")],
+        activeChatIds: new Set(["current"]),
+      });
+      const current = screen.getByText("Chat current").closest("[role='button']");
+      const other = screen.getByText("Chat other").closest("[role='button']");
+      expect(current?.getAttribute("aria-current")).toBe("true");
+      expect(current?.className).toContain("tw-shadow-[inset_0_0_0_1px_var(--color-blue)]");
+      expect(other?.hasAttribute("aria-current")).toBe(false);
+      expect(other?.className).not.toContain("tw-shadow-[inset");
     });
 
     it("defaults to the global empty-state copy", () => {

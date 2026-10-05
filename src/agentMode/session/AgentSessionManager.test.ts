@@ -470,6 +470,21 @@ describe("AgentSessionManager", () => {
       });
     });
 
+    describe("getActiveChatIds()", () => {
+      it("follows the active session", async () => {
+        const mgr = buildManager();
+        expect(mgr.getActiveChatIds().size).toBe(0);
+        const first = await mgr.createSession();
+        const second = await mgr.createSession();
+        const firstId = buildNativeChatId(first.backendId, first.getBackendSessionId()!);
+        const secondId = buildNativeChatId(second.backendId, second.getBackendSessionId()!);
+        mgr.setActiveSession(first.internalId);
+        expect(mgr.getActiveChatIds()).toEqual(new Set([firstId]));
+        mgr.setActiveSession(second.internalId);
+        expect(mgr.getActiveChatIds()).toEqual(new Set([secondId]));
+      });
+    });
+
     describe("detachSessionFromTab()", () => {
       it("keeps the backend session open and discoverable in history for https://github.com/Brevilabs/obsidian-copilot-private/issues/429", async () => {
         const mgr = buildManager();
